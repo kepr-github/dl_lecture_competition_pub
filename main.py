@@ -362,6 +362,7 @@ def main():
     # deviceの設定
     set_seed(42)
     device = "cuda" if torch.cuda.is_available() else "cpu"
+    print(device)
 
     # dataloader / model
     transform = transforms.Compose([
@@ -371,18 +372,21 @@ def main():
     train_dataset = VQADataset(df_path="./data/train.json", image_dir="./data/train", transform=transform)
     test_dataset = VQADataset(df_path="./data/valid.json", image_dir="./data/valid", transform=transform, answer=False)
     test_dataset.update_dict(train_dataset)
+    print(len(train_dataset), len(test_dataset))
 
     train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=128, shuffle=True)
     test_loader = torch.utils.data.DataLoader(test_dataset, batch_size=1, shuffle=False)
 
+
     model = VQAModel(vocab_size=len(train_dataset.question2idx)+1, n_answer=len(train_dataset.answer2idx)).to(device)
 
     # optimizer / criterion
-    num_epoch = 20
+    num_epoch = 1
     criterion = nn.CrossEntropyLoss()
     optimizer = torch.optim.Adam(model.parameters(), lr=0.001, weight_decay=1e-5)
 
     # train model
+    print("start training")
     for epoch in range(num_epoch):
         train_loss, train_acc, train_simple_acc, train_time = train(model, train_loader, optimizer, criterion, device)
         print(f"【{epoch + 1}/{num_epoch}】\n"
@@ -394,6 +398,7 @@ def main():
     # 提出用ファイルの作成
     model.eval()
     submission = []
+    print("start submission")
     for image, question in test_loader:
         image, question = image.to(device), question.to(device)
         pred = model(image, question)
