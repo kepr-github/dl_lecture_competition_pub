@@ -9,8 +9,37 @@ import pandas
 import torch
 import torch.nn as nn
 import torchvision
+from torchvision import models
 from torchvision import transforms
+from torch.utils.data import random_split
+import csv
+import matplotlib.pyplot as plt
+from IPython.display import clear_output, display
+import os
+import gc
 
+
+def generate_unique_filename(base_path, extension=".pth"):
+    timestamp = time.strftime("%Y%m%d-%H%M%S")
+    return f"{base_path}_{timestamp}{extension}"
+
+
+def read_params(file_path):
+    params = {}
+    with open(file_path, mode='r') as infile:
+        reader = csv.reader(infile)
+        next(reader)  # Skip header row
+        for rows in reader:
+            key = rows[0]
+            value = rows[1]
+            # 数値のキャスト処理を追加
+            if key in ["seed", "batch_size", "num_epoch"]:
+                params[key] = int(value)
+            elif key in ["learning_rate", "weight_decay"]:
+                params[key] = float(value)
+            else:
+                params[key] = value
+    return params
 
 def set_seed(seed):
     random.seed(seed)
@@ -286,11 +315,19 @@ def ResNet18():
 def ResNet50():
     return ResNet(BottleneckBlock, [3, 4, 6, 3])
 
+def ResNet50_trained():
+    # 学習済みモデルの読み込み
+    # Resnet50を重み付きで読み込む
+    model_ft = models.resnet50(pretrained = True)
+    model_ft.fc = nn.Linear(model_ft.fc.in_features, 512)
+
+    return model_ft
+
 
 class VQAModel(nn.Module):
     def __init__(self, vocab_size: int, n_answer: int):
         super().__init__()
-        self.resnet = ResNet18()
+        self.resnet = ResNet50_trained()
         self.text_encoder = nn.Linear(vocab_size, 512)
 
         self.fc = nn.Sequential(
@@ -316,9 +353,13 @@ def train(model, dataloader, optimizer, criterion, device):
     total_loss = 0
     total_acc = 0
     simple_acc = 0
+    # loss_list = []
+    # vqa_acc_list = []
+    # simple_acc_list = []
+    # fig, ax = plt.subplots(1, 1, figsize=(10, 5))
 
     start = time.time()
-    for image, question, answers, mode_answer in dataloader:
+    for batch_idx, (image, question, answers, mode_answer) in enumerate(dataloader):
         image, question, answer, mode_answer = \
             image.to(device), question.to(device), answers.to(device), mode_answer.to(device)
 
@@ -329,9 +370,37 @@ def train(model, dataloader, optimizer, criterion, device):
         loss.backward()
         optimizer.step()
 
-        total_loss += loss.item()
-        total_acc += VQA_criterion(pred.argmax(1), answers)  # VQA accuracy
-        simple_acc += (pred.argmax(1) == mode_answer).float().mean().item()  # simple accuracy
+        batch_loss = loss.item()
+        batch_vqa_acc = VQA_criterion(pred.argmax(1), answers)
+        batch_simple_acc = (pred.argmax(1) == mode_answer).float().mean().item()
+
+        total_loss += batch_loss
+        total_acc += batch_vqa_acc
+        simple_acc += batch_simple_acc
+
+        # # 損失と精度のリストに追加
+        # loss_list.append(batch_loss)
+        # vqa_acc_list.append(batch_vqa_acc)
+        # simple_acc_list.append(batch_simple_acc)
+
+        # # グラフの更新
+        # clear_output(wait=True)
+        # ax.clear()
+        # ax.plot(loss_list, label='Loss')
+        # ax.plot(vqa_acc_list, label='VQA Accuracy')
+        # ax.plot(simple_acc_list, label='Simple Accuracy')
+        # ax.set_xlabel('Batch')
+        # ax.set_ylabel('Value')
+        # ax.legend()
+        # plt.show()
+
+
+        # total_loss += loss.item()
+        # total_acc += VQA_criterion(pred.argmax(1), answers)  # VQA accuracy
+        # simple_acc += (pred.argmax(1) == mode_answer).float().mean().item()  # simple accuracy
+        # Print batch loss and accuracy
+        print(f'Batch {batch_idx + 1}/{len(dataloader)} - Loss: {loss.item():.4f}, '
+              f'VQA Accuracy: { VQA_criterion(pred.argmax(1), answers):.4f}, Simple Accuracy: { (pred.argmax(1) == mode_answer).float().mean().item():.4f}')
 
     return total_loss / len(dataloader), total_acc / len(dataloader), simple_acc / len(dataloader), time.time() - start
 
@@ -353,14 +422,16 @@ def eval(model, dataloader, optimizer, criterion, device):
 
         total_loss += loss.item()
         total_acc += VQA_criterion(pred.argmax(1), answers)  # VQA accuracy
-        simple_acc += (pred.argmax(1) == mode_answer).mean().item()  # simple accuracy
+        simple_acc += (pred.argmax(1) == mode_answer).float().mean().item()  # simple accuracy
 
     return total_loss / len(dataloader), total_acc / len(dataloader), simple_acc / len(dataloader), time.time() - start
 
-
 def main():
+    # パラメータの読み込み
+    params = read_params('config.csv')
+
     # deviceの設定
-    set_seed(42)
+    set_seed(params['seed'])
     device = "cuda" if torch.cuda.is_available() else "cpu"
     print(device)
 
@@ -369,31 +440,100 @@ def main():
         transforms.Resize((224, 224)),
         transforms.ToTensor()
     ])
-    train_dataset = VQADataset(df_path="./data/train.json", image_dir="./data/train", transform=transform)
-    test_dataset = VQADataset(df_path="./data/valid.json", image_dir="./data/valid", transform=transform, answer=False)
-    test_dataset.update_dict(train_dataset)
-    print(len(train_dataset), len(test_dataset))
+    train_datasets = VQADataset(df_path=params['train_df_path'], image_dir=params['train_image_dir'], transform=transform)
+    test_dataset = VQADataset(df_path=params['valid_df_path'], image_dir=params['valid_image_dir'], transform=transform, answer=False)
+    test_dataset.update_dict(train_datasets)
+    print(len(train_datasets), len(test_dataset))
 
-    train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=128, shuffle=True)
+
+    total_size = len(train_datasets)
+    val_size = int(total_size * 0.15)  # For example, 20% for validation
+    train_size = total_size - val_size
+
+    train_dataset, val_dataset = random_split(train_datasets, [train_size, val_size])
+
+
+
+    train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=params['batch_size'], shuffle=True)
+    val_loader = torch.utils.data.DataLoader(val_dataset, batch_size=params['batch_size'], shuffle=False)
     test_loader = torch.utils.data.DataLoader(test_dataset, batch_size=1, shuffle=False)
 
-
-    model = VQAModel(vocab_size=len(train_dataset.question2idx)+1, n_answer=len(train_dataset.answer2idx)).to(device)
+    model = VQAModel(vocab_size=len(train_datasets.question2idx) + 1, n_answer=len(train_datasets.answer2idx)).to(device)
 
     # optimizer / criterion
-    num_epoch = 1
     criterion = nn.CrossEntropyLoss()
-    optimizer = torch.optim.Adam(model.parameters(), lr=0.001, weight_decay=1e-5)
+    optimizer = torch.optim.Adam(model.parameters(), lr=params['learning_rate'], weight_decay=params['weight_decay'])
 
     # train model
     print("start training")
-    for epoch in range(num_epoch):
+
+    # 訓練データを保存するリスト
+    train_losses = []
+    train_accuracies = []
+    train_simple_accuracies = []
+    val_losses = []
+    val_accuracies = []
+    val_simple_accuracies = []
+    for epoch in range(params['num_epoch']):
+        gc.collect()
+        torch.cuda.empty_cache()
+        torch.cuda.synchronize()
         train_loss, train_acc, train_simple_acc, train_time = train(model, train_loader, optimizer, criterion, device)
-        print(f"【{epoch + 1}/{num_epoch}】\n"
+        print("finish train")
+        val_loss, val_acc, val_simple_acc,val_time = eval(model, val_loader, optimizer, criterion, device)
+        # データをリストに保存
+        train_losses.append(train_loss)
+        train_accuracies.append(train_acc)
+        train_simple_accuracies.append(train_simple_acc)
+        val_losses.append(train_loss)
+        val_accuracies.append(train_acc)
+        val_simple_accuracies.append(train_simple_acc)
+        print(f"【{epoch + 1}/{params['num_epoch']}】\n"
               f"train time: {train_time:.2f} [s]\n"
               f"train loss: {train_loss:.4f}\n"
               f"train acc: {train_acc:.4f}\n"
               f"train simple acc: {train_simple_acc:.4f}")
+        print(f"【{epoch + 1}/{params['num_epoch']}】\n"
+              f"val time: {val_time:.2f} [s]\n"
+              f"val loss: {val_loss:.4f}\n"
+              f"val acc: {val_acc:.4f}\n"
+              f"val simple acc: {val_simple_acc:.4f}")
+        # グラフの更新
+        clear_output(wait=True)
+        epochs = range(1, epoch + 2)
+        
+        plt.figure(figsize=(12, 6))
+        
+        # 損失のプロット
+        plt.subplot(1, 2, 1)
+        plt.plot(epochs, train_losses, 'b', label='Training loss')
+        plt.plot(epochs, val_losses, 'r', label='val loss')
+        plt.title('Training loss')
+        plt.xlabel('Epochs')
+        plt.ylabel('Loss')
+        plt.legend()
+        
+        # 精度のプロット
+        plt.subplot(1, 2, 2)
+        plt.plot(epochs, train_accuracies, 'r', label='Training accuracy')
+        plt.plot(epochs, train_simple_accuracies, 'g', label='Training simple accuracy')
+        plt.plot(epochs, val_accuracies, 'r', label='val accuracy')
+        plt.plot(epochs, val_simple_accuracies, 'g', label='val simple accuracy')
+        plt.title('Training accuracy')
+        plt.xlabel('Epochs')
+        plt.ylabel('Accuracy')
+        plt.legend()
+        
+        plt.tight_layout()
+        display(plt.gcf())
+        plot_path = os.path.join("fig", f'epoch_{epoch + 1}.png')
+        plt.savefig(plot_path)
+        plt.close()
+        time.sleep(0.1)  # 更新の間隔を調整するために少し待つ
+
+    model_save_path = generate_unique_filename(params['model_save_path'].replace(".pth", ""))
+    torch.save(model.state_dict(), model_save_path)
+    np.save(submission_save_path, submission)
 
     # 提出用ファイルの作成
     model.eval()
@@ -405,10 +545,29 @@ def main():
         pred = pred.argmax(1).cpu().item()
         submission.append(pred)
 
-    submission = [train_dataset.idx2answer[id] for id in submission]
+    submission = [train_datasets.idx2answer[id] for id in submission]
     submission = np.array(submission)
-    torch.save(model.state_dict(), "model.pth")
-    np.save("submission.npy", submission)
+
+    # タイムスタンプを利用して固有のファイル名を生成
+    submission_save_path = generate_unique_filename(params['submission_save_path'].replace(".npy", ""), extension=".npy")
+    
+    # パラメータとファイルパスを一つの辞書にまとめる
+    result_dict = params.copy()
+    result_dict['model_save_path'] = model_save_path
+    result_dict['submission_save_path'] = submission_save_path
+
+    # CSVファイルに書き込む
+    csv_file_path = 'training_results.csv'
+    file_exists = os.path.isfile(csv_file_path)
+
+    with open(csv_file_path, mode='a', newline='') as csvfile:
+        fieldnames = list(result_dict.keys())
+        writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+        
+        if not file_exists:
+            writer.writeheader()
+        
+        writer.writerow(result_dict)
 
 if __name__ == "__main__":
     main()

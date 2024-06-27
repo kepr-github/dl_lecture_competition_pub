@@ -14,6 +14,7 @@ RUN apt install -y --no-install-recommends \
         libbz2-dev \
         python3-pip \
         python3-setuptools \
+        python3-tk \
         wget \
         git \
         tzdata \

@@ -1,0 +1,12 @@
+param,value
+seed,42
+batch_size,64
+num_epoch,2
+learning_rate,0.01
+weight_decay,1e-5
+train_df_path,./data/train.json
+valid_df_path,./data/valid.json
+train_image_dir,./data/train
+valid_image_dir,./data/valid
+model_save_path,./result/model/model.pth
+submission_save_path,./result/submission/submission.npy

@@ -10,8 +10,9 @@ pip install -r requirements.txt
 ### Docker
 - Dockerイメージのcudaバージョンについては，ご自身が利用するGPUに合わせて変更してください．
 ```bash
-docker build -t vqatest .
-docker run -it -v $PWD:/workspace -w /workspace vqatest bash
+docker build -t vqa .
+
+docker run --gpus all -it -v "${PWD}:/workspace" -w /workspace vqa bash
 ```
 Python 3.10.12
 
