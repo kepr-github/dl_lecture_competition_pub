@@ -17,6 +17,7 @@ import matplotlib.pyplot as plt
 from IPython.display import clear_output, display
 import os
 import gc
+from transformers import BertTokenizer, BertModel
 
 
 def generate_unique_filename(extension=".pth"):
@@ -159,23 +160,18 @@ class VQADataset(torch.utils.data.Dataset):
         """
         image = Image.open(f"{self.image_dir}/{self.df['image'][idx]}")
         image = self.transform(image)
-        question = np.zeros(len(self.idx2question) + 1)  # 未知語用の要素を追加
-        question_words = self.df["question"][idx].split(" ")
-        for word in question_words:
-            try:
-                question[self.question2idx[word]] = 1  # one-hot表現に変換
-            except KeyError:
-                question[-1] = 1  # 未知語
+
+        question = self.df["question"][idx]
+        # question_encoding = self.tokenizer(question, return_tensors='pt', padding=True, truncation=True)
 
         if self.answer:
             answers = [self.answer2idx[process_text(answer["answer"])] for answer in self.df["answers"][idx]]
             mode_answer_idx = mode(answers)  # 最頻値を取得（正解ラベル）
 
-            return image, torch.Tensor(question), torch.Tensor(answers), int(mode_answer_idx)
+            return image, question, torch.Tensor(answers), int(mode_answer_idx)
 
         else:
-            return image, torch.Tensor(question)
-
+            return image, question
     def __len__(self):
         return len(self.df)
 
@@ -328,20 +324,26 @@ class VQAModel(nn.Module):
     def __init__(self, vocab_size: int, n_answer: int):
         super().__init__()
         self.resnet = ResNet50_trained()
-        self.text_encoder = nn.Linear(vocab_size, 512)
+
+        # BERTモデルのエンコーダーを追加
+        self.bert_model = BertModel.from_pretrained('bert-base-uncased')
+        # BERTのパラメータをフリーズ
+        for param in self.bert_model.parameters():
+            param.requires_grad = False
 
         self.fc = nn.Sequential(
-            nn.Linear(1024, 512),
+            nn.Linear(1280, 512),
             nn.ReLU(inplace=True),
             nn.Linear(512, n_answer)
         )
 
     def forward(self, image, question):
         image_feature = self.resnet(image)  # 画像の特徴量
-        question_feature = self.text_encoder(question)  # テキストの特徴量
+        question_feature = self.bert_model(question).last_hidden_state[:, 0, :]  # テキストの特徴量
 
         x = torch.cat([image_feature, question_feature], dim=1)
         x = self.fc(x)
+        print(x)
 
         return x
 
