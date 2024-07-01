@@ -19,9 +19,9 @@ import os
 import gc
 
 
-def generate_unique_filename(base_path, extension=".pth"):
+def generate_unique_filename(extension=".pth"):
     timestamp = time.strftime("%Y%m%d-%H%M%S")
-    return f"{base_path}_{timestamp}{extension}"
+    return f"{timestamp}{extension}"
 
 
 def read_params(file_path):
@@ -426,6 +426,14 @@ def eval(model, dataloader, optimizer, criterion, device):
 
     return total_loss / len(dataloader), total_acc / len(dataloader), simple_acc / len(dataloader), time.time() - start
 
+def create_directory_if_not_exists(directory_path):
+    # ディレクトリが存在しない場合に作成する
+    if not os.path.exists(directory_path):
+        os.makedirs(directory_path)
+        print(f"Directory '{directory_path}' has been created.")
+    else:
+        print(f"Directory '{directory_path}' already exists.")
+
 def main():
     # パラメータの読み込み
     params = read_params('config.csv')
@@ -438,8 +446,11 @@ def main():
     # dataloader / model
     transform = transforms.Compose([
         transforms.Resize((224, 224)),
-        transforms.ToTensor()
+        transforms.RandomRotation(60),  # ランダムに最大10度回転
+        transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2, hue=0.2),  # カラーのランダム調整
+        transforms.ToTensor()  # テンソルに変換
     ])
+
     train_datasets = VQADataset(df_path=params['train_df_path'], image_dir=params['train_image_dir'], transform=transform)
     test_dataset = VQADataset(df_path=params['valid_df_path'], image_dir=params['valid_image_dir'], transform=transform, answer=False)
     test_dataset.update_dict(train_datasets)
@@ -447,7 +458,7 @@ def main():
 
 
     total_size = len(train_datasets)
-    val_size = int(total_size * 0.15)  # For example, 20% for validation
+    val_size = int(total_size * 0.10)  # For example, 20% for validation
     train_size = total_size - val_size
 
     train_dataset, val_dataset = random_split(train_datasets, [train_size, val_size])
@@ -466,6 +477,8 @@ def main():
 
     # train model
     print("start training")
+    fig_dir = os.path.join("fig", generate_unique_filename(extension=""))
+    create_directory_if_not_exists(fig_dir)
 
     # 訓練データを保存するリスト
     train_losses = []
@@ -485,9 +498,9 @@ def main():
         train_losses.append(train_loss)
         train_accuracies.append(train_acc)
         train_simple_accuracies.append(train_simple_acc)
-        val_losses.append(train_loss)
-        val_accuracies.append(train_acc)
-        val_simple_accuracies.append(train_simple_acc)
+        val_losses.append(val_loss)
+        val_accuracies.append(val_acc)
+        val_simple_accuracies.append(val_simple_acc)
         print(f"【{epoch + 1}/{params['num_epoch']}】\n"
               f"train time: {train_time:.2f} [s]\n"
               f"train loss: {train_loss:.4f}\n"
@@ -508,7 +521,7 @@ def main():
         plt.subplot(1, 2, 1)
         plt.plot(epochs, train_losses, 'b', label='Training loss')
         plt.plot(epochs, val_losses, 'r', label='val loss')
-        plt.title('Training loss')
+        plt.title('loss')
         plt.xlabel('Epochs')
         plt.ylabel('Loss')
         plt.legend()
@@ -516,24 +529,25 @@ def main():
         # 精度のプロット
         plt.subplot(1, 2, 2)
         plt.plot(epochs, train_accuracies, 'r', label='Training accuracy')
-        plt.plot(epochs, train_simple_accuracies, 'g', label='Training simple accuracy')
-        plt.plot(epochs, val_accuracies, 'r', label='val accuracy')
-        plt.plot(epochs, val_simple_accuracies, 'g', label='val simple accuracy')
-        plt.title('Training accuracy')
+        plt.plot(epochs, train_simple_accuracies, 'b', label='Training simple accuracy')
+        plt.plot(epochs, val_accuracies, 'g', label='val accuracy')
+        plt.plot(epochs, val_simple_accuracies, 'y', label='val simple accuracy')
+        plt.title('accuracy')
         plt.xlabel('Epochs')
         plt.ylabel('Accuracy')
         plt.legend()
         
         plt.tight_layout()
         display(plt.gcf())
-        plot_path = os.path.join("fig", f'epoch_{epoch + 1}.png')
+        plot_path = os.path.join(fig_dir, f'epoch_{epoch + 1}.png')
         plt.savefig(plot_path)
         plt.close()
         time.sleep(0.1)  # 更新の間隔を調整するために少し待つ
 
-    model_save_path = generate_unique_filename(params['model_save_path'].replace(".pth", ""))
-    torch.save(model.state_dict(), model_save_path)
-    np.save(submission_save_path, submission)
+    model_save_file = generate_unique_filename()
+    p = os.path.join("./result/model", model_save_file)
+    torch.save(model.state_dict(), p)
+
 
     # 提出用ファイルの作成
     model.eval()
@@ -549,11 +563,13 @@ def main():
     submission = np.array(submission)
 
     # タイムスタンプを利用して固有のファイル名を生成
-    submission_save_path = generate_unique_filename(params['submission_save_path'].replace(".npy", ""), extension=".npy")
-    
+    submission_save_path = generate_unique_filename(extension=".npy")
+    p = os.path.join("./result/submission", submission_save_path)
+    np.save(p, submission)
+
     # パラメータとファイルパスを一つの辞書にまとめる
     result_dict = params.copy()
-    result_dict['model_save_path'] = model_save_path
+    result_dict['model_save_path'] = model_save_file
     result_dict['submission_save_path'] = submission_save_path
 
     # CSVファイルに書き込む
