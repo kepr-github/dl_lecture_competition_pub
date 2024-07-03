@@ -3,3 +3,4 @@ data/*
 *.npy
 result/*
 fig/*
+training_results.csv

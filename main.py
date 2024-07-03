@@ -20,6 +20,7 @@ import gc
 from transformers import BertTokenizer, BertModel
 
 
+
 def generate_unique_filename(extension=".pth"):
     timestamp = time.strftime("%Y%m%d-%H%M%S")
     return f"{timestamp}{extension}"
@@ -98,6 +99,9 @@ class VQADataset(torch.utils.data.Dataset):
         self.image_dir = image_dir  # 画像ファイルのディレクトリ
         self.df = pandas.read_json(df_path)  # 画像ファイルのパス，question, answerを持つDataFrame
         self.answer = answer
+        # BERTトークナイザーのロード
+        self.tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
+        self.model = BertModel.from_pretrained('bert-base-uncased')
 
         # question / answerの辞書を作成
         self.question2idx = {}
@@ -161,17 +165,21 @@ class VQADataset(torch.utils.data.Dataset):
         image = Image.open(f"{self.image_dir}/{self.df['image'][idx]}")
         image = self.transform(image)
 
-        question = self.df["question"][idx]
-        # question_encoding = self.tokenizer(question, return_tensors='pt', padding=True, truncation=True)
+        # BERTで質問をベクトル化
+        text = self.df["question"][idx]
+        inputs = self.tokenizer(text, return_tensors='pt', truncation=True, padding=True)
+        with torch.no_grad():
+            outputs = self.model(**inputs)
+        question_vector = outputs.last_hidden_state[:, 0, :].squeeze()
 
         if self.answer:
             answers = [self.answer2idx[process_text(answer["answer"])] for answer in self.df["answers"][idx]]
-            mode_answer_idx = mode(answers)  # 最頻値を取得（正解ラベル）
+            mode_answer_idx = mode(answers)  # 最頻値を取得（正解ラベル）     
 
-            return image, question, torch.Tensor(answers), int(mode_answer_idx)
+            return  image,  question_vector, torch.Tensor(answers), int(mode_answer_idx)
 
         else:
-            return image, question
+            return  image,  question_vector
     def __len__(self):
         return len(self.df)
 
@@ -325,27 +333,44 @@ class VQAModel(nn.Module):
         super().__init__()
         self.resnet = ResNet50_trained()
 
-        # BERTモデルのエンコーダーを追加
-        self.bert_model = BertModel.from_pretrained('bert-base-uncased')
-        # BERTのパラメータをフリーズ
-        for param in self.bert_model.parameters():
-            param.requires_grad = False
+        # # BERTモデルのエンコーダーを追加
+        # self.bert_model = BertModel.from_pretrained('bert-base-uncased')
+        # # BERTのパラメータをフリーズ
+        # for param in self.bert_model.parameters():
+        #     param.requires_grad = False
+        self.image_transform = nn.Linear(512, 768)
+
+        # マルチヘッドAttention層
+        self.multihead_attention = nn.MultiheadAttention(embed_dim=768, num_heads=8)
 
         self.fc = nn.Sequential(
-            nn.Linear(1280, 512),
+            nn.Linear(1536, 512),
             nn.ReLU(inplace=True),
             nn.Linear(512, n_answer)
         )
 
     def forward(self, image, question):
         image_feature = self.resnet(image)  # 画像の特徴量
-        question_feature = self.bert_model(question).last_hidden_state[:, 0, :]  # テキストの特徴量
+        image_feature = self.image_transform(image_feature)  # 次元を変換 (バッチサイズ, 768)
+        question_feature = question
+        # print(question_feature.shape)
 
-        x = torch.cat([image_feature, question_feature], dim=1)
-        x = self.fc(x)
-        print(x)
+        # マルチヘッドAttention
+        atten_ima,weight = self.multihead_attention(image_feature,image_feature,image_feature)
 
-        return x
+        # attention_output = attention_output.mean(dim=1)  # (バッチサイズ, 768)
+
+        # image_feature = image_feature.squeeze(1)
+        # 画像特徴量と質問特徴量の結合
+ 
+      
+        combined_feature = torch.cat([atten_ima, question_feature], dim=1)  # (バッチサイズ, 2048 + 768)
+
+        # 全結合層を通して最終出力
+        output = self.fc(combined_feature)
+        # x = torch.cat([image_feature, question_feature], dim=1)
+        # x = self.fc(x)
+        return output
 
 
 # 4. 学習の実装
@@ -362,6 +387,7 @@ def train(model, dataloader, optimizer, criterion, device):
 
     start = time.time()
     for batch_idx, (image, question, answers, mode_answer) in enumerate(dataloader):
+        # print(question)
         image, question, answer, mode_answer = \
             image.to(device), question.to(device), answers.to(device), mode_answer.to(device)
 
@@ -437,6 +463,7 @@ def create_directory_if_not_exists(directory_path):
         print(f"Directory '{directory_path}' already exists.")
 
 def main():
+    torch.cuda.empty_cache()
     # パラメータの読み込み
     params = read_params('config.csv')
 
@@ -448,13 +475,17 @@ def main():
     # dataloader / model
     transform = transforms.Compose([
         transforms.Resize((224, 224)),
-        transforms.RandomRotation(60),  # ランダムに最大10度回転
-        transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2, hue=0.2),  # カラーのランダム調整
+        transforms.RandomRotation(20),  # ランダムに最大10度回転
+        transforms.ColorJitter(brightness=0.1, contrast=0.1, saturation=0.1, hue=0.1),  # カラーのランダム調整
         transforms.ToTensor()  # テンソルに変換
+    ])
+    transform_test = transforms.Compose([
+        transforms.Resize((224, 224)),
+        transforms.ToTensor()
     ])
 
     train_datasets = VQADataset(df_path=params['train_df_path'], image_dir=params['train_image_dir'], transform=transform)
-    test_dataset = VQADataset(df_path=params['valid_df_path'], image_dir=params['valid_image_dir'], transform=transform, answer=False)
+    test_dataset = VQADataset(df_path=params['valid_df_path'], image_dir=params['valid_image_dir'], transform=transform_test, answer=False)
     test_dataset.update_dict(train_datasets)
     print(len(train_datasets), len(test_dataset))
 

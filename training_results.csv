@@ -1,2 +1,3 @@
 seed,batch_size,num_epoch,learning_rate,weight_decay,train_df_path,valid_df_path,train_image_dir,valid_image_dir,model_save_path,submission_save_path
 42,64,10,0.001,1e-05,./data/train.json,./data/valid.json,./data/train,./data/valid,./result/model/model_20240629-083403.pth,./result/submission/submission_20240629-084034.npy
+42,64,15,0.01,1e-05,./data/train.json,./data/valid.json,./data/train,./data/valid,20240701-221405.pth,20240701-222156.npy
