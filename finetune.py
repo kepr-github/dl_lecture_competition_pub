@@ -557,6 +557,11 @@ def main():
 
     model = VQAModel(vocab_size=len(train_datasets.question2idx) + 1, n_answer=len(train_datasets.answer2idx)).to(device)
 
+
+    # 学習済みモデルの読み込み
+    model_path = 'result/model/20240717-223512.pth'  # 学習済みモデルのパスを指定
+    model.load_state_dict(torch.load(model_path, map_location=device))
+
     # optimizer / criterion
     criterion = nn.CrossEntropyLoss()
     optimizer = torch.optim.Adam(model.parameters(), lr=params['learning_rate'], weight_decay=params['weight_decay'])

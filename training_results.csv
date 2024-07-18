@@ -1,3 +1,11 @@
 seed,batch_size,num_epoch,learning_rate,weight_decay,train_df_path,valid_df_path,train_image_dir,valid_image_dir,model_save_path,submission_save_path
 42,64,10,0.001,1e-05,./data/train.json,./data/valid.json,./data/train,./data/valid,./result/model/model_20240629-083403.pth,./result/submission/submission_20240629-084034.npy
 42,64,15,0.01,1e-05,./data/train.json,./data/valid.json,./data/train,./data/valid,20240701-221405.pth,20240701-222156.npy
+42,64,15,0.001,1e-05,./data/train.json,./data/valid.json,./data/train,./data/valid,20240704-010436.pth,20240704-011247.npy
+42,64,1,0.001,1e-05,./data/train.json,./data/valid.json,./data/train,./data/valid,20240712-102659.pth,20240712-103533.npy
+42,64,15,0.001,1e-05,./data/train.json,./data/valid.json,./data/train,./data/valid,20240713-145329.pth,20240713-150029.npy
+42,64,15,0.001,0.001,./data/train.json,./data/valid.json,./data/train,./data/valid,20240714-144656.pth,20240714-145410.npy
+42,32,5,0.001,0.001,./data/train.json,./data/valid.json,./data/train,./data/valid,20240715-150938.pth,20240715-152251.npy
+42,32,5,0.005,0.001,./data/train.json,./data/valid.json,./data/train,./data/valid,20240716-112029.pth,20240716-113609.npy
+42,32,5,0.005,0.005,./data/train.json,./data/valid.json,./data/train,./data/valid,20240717-223512.pth,20240717-224723.npy
+42,32,3,0.01,0.001,./data/train.json,./data/valid.json,./data/train,./data/valid,20240718-044532.pth,20240718-045742.npy

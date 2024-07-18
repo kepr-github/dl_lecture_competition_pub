@@ -1,9 +1,9 @@
 param,value
 seed,42
-batch_size,64
-num_epoch,15
-learning_rate,0.001
-weight_decay,1e-5
+batch_size,32
+num_epoch,3
+learning_rate,0.01
+weight_decay,0.001
 train_df_path,./data/train.json
 valid_df_path,./data/valid.json
 train_image_dir,./data/train
